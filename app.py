@@ -1,8 +1,28 @@
-import os
-from flask import Flask, render_template, request, url_for
-from flask_socketio import SocketIO, emit, join_room, leave_room
-import random
-import logging # Adicionado para logs mais detalhados
+#import os
+#from flask import Flask, render_template, request, url_for
+#from flask_socketio import SocketIO, emit, join_room, leave_room
+#import random
+#import logging # Adicionado para logs mais detalhados
+from flask import Flask, render_template
+from flask_socketio import SocketIO, emit
+
+app = Flask(__name__)
+app.config['SECRET_KEY'] = '…'
+
+socketio = SocketIO(app, cors_allowed_origins="*")
+
+@app.route('/')
+def home_cartela():
+    return render_template('index.html')
+
+@app.route('/host')
+def host_bingo():
+    return render_template('host.html')
+
+# … resto do código …
+
+if __name__ == '__main__':
+    socketio.run(app, host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
 
 # Configuração do Flask para encontrar templates e arquivos estáticos
 # Assumimos a estrutura padrão: templates/ e static/ na raiz do projeto
