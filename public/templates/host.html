@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+    <meta charset="UTF-8" />
+    <title>Sorteador de Bingo</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            background-color: #eef2f8;
+            padding: 20px;
+            text-align: center;
+        }
+
+        h1 {
+            color: #0078d4;
+            margin-bottom: 10px;
+        }
+
+        #numeroAtual {
+            font-size: 64px;
+            font-weight: bold;
+            margin: 20px 0;
+            color: #222;
+        }
+
+        #btnSortear {
+            padding: 12px 24px;
+            font-size: 20px;
+            background-color: #0078d4;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            margin-bottom: 30px;
+        }
+
+        #btnSortear:hover {
+            background-color: #005a9e;
+        }
+
+        #btnReiniciar {
+            padding: 10px 20px;
+            font-size: 16px;
+            background-color: #dc3545;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            margin-left: 10px;
+        }
+        #btnReiniciar:hover {
+            background-color: #c82333;
+        }
+
+        table {
+            margin: 0 auto;
+            border-collapse: collapse;
+            margin-top: 20px;
+            width: 30%;
+            min-width: 300px;
+        }
+
+        th, td {
+            border: 1px solid #999;
+            width: 50px;
+            height: 50px;
+            text-align: center;
+            vertical-align: middle;
+            font-size: 20px;
+            font-weight: bold;
+        }
+
+        th {
+            background-color: #0078d4;
+            color: white;
+        }
+
+        td.marked {
+            background-color: #ffd700;
+            color: #000;
+        }
+        td.winner-number {
+            background-color: #28a745;
+            color: white;
+        }
+
+        #status-bar {
+            margin-top: 15px;
+            font-weight: bold;
+            color: #333;
+        }
+        #players-connected {
+            margin-top: 10px;
+            font-weight: bold;
+            color: #0078d4;
+        }
+
+        footer {
+            margin-top: 40px; /* Espaço acima do rodapé */
+            padding: 20px;
+            background-color: #f2f2f2; /* Um fundo cinza claro */
+            color: #555;
+            font-size: 14px;
+            text-align: center;
+            border-top: 1px solid #ddd; /* Linha divisória */
+        }
+
+        footer p {
+            margin: 5px 0;
+        }
+
+        footer a {
+            color: #0078d4;
+            text-decoration: none;
+        }
+
+        footer a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <h1>Sorteador de BINGO</h1>
+    <div id="numeroAtual">--</div>
+    <button id="btnSortear">Sortear Número</button>
+    <button id="btnReiniciar">Reiniciar Jogo</button>
+
+    <div id="status-bar">Conexão: Aguardando...</div>
+    <div id="players-connected">Jogadores Conectados: 0</div>
+
+    <h3>Tabela de Números Sorteados:</h3>
+    <table id="bingoTable">
+        <thead>
+            <tr>
+                <th>B</th>
+                <th>I</th>
+                <th>N</th>
+                <th>G</th>
+                <th>O</th>
+            </tr>
+        </thead>
+        <tbody id="bingoBody">
+            </tbody>
+    </table>
+
+    <audio id="somSorteio" src="audio/sorteio.mp3" preload="auto"></audio>
+    <audio id="somVencedor" src="audio/vencedor.mp3" preload="auto"></audio>
+
+    <footer>
+        <p>Kako Projetos, telefone 55(61) 98497-1049</p>
+        <p>E-mail: <a href="mailto:kakojg@gmail.com">kakojg@gmail.com</a></p>
+    </footer>
+
+    <script>
+        const btnSortear = document.getElementById("btnSortear");
+        const btnReiniciar = document.getElementById("btnReiniciar");
+        const numeroAtual = document.getElementById("numeroAtual");
+        const somSorteio = document.getElementById("somSorteio");
+        const somVencedor = document.getElementById("somVencedor");
+        const statusBar = document.getElementById("status-bar");
+        const playersConnectedDiv = document.getElementById("players-connected");
+
+        // --- CONEXÃO WEBSOCKET ATUALIZADA PARA HEROKU ---
+        const socket = new WebSocket(`wss://seu-app-do-heroku.herokuapp.com/`); // Substitua pelo URL REAL do seu app Heroku
+        // -------------------------------------------------
+
+        let sorteados = [];
+        let playerCartelasData = {};
+
+        function gerarTabela() {
+            const corpo = document.getElementById("bingoBody");
+            corpo.innerHTML = "";
+
+            for (let i = 0; i < 15; i++) {
+                const tr = document.createElement("tr");
+                for (let j = 0; j < 5; j++) {
+                    const td = document.createElement("td");
+                    const num = (j * 15) + (i + 1);
+                    td.id = "num-" + num;
+                    td.textContent = num;
+                    tr.appendChild(td);
+                }
+                corpo.appendChild(tr);
+            }
+        }
+
+        function marcarNumero(n) {
+            const celula = document.getElementById("num-" + n);
+            if (celula) {
+                celula.classList.add("marked");
+            }
+        }
+
+        function limparMarcacoesVitoria() {
+            const markedCells = document.querySelectorAll('#bingoTable td.winner-number');
+            markedCells.forEach(cell => {
+                cell.classList.remove('winner-number');
+            });
+        }
+
+        socket.onopen = () => {
+            console.log("Conectado ao servidor WebSocket (Sorteador)");
+            statusBar.textContent = "Conexão: Online";
+        };
+
+        socket.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                if (data.type === 'sorted_number') {
+                    const n = parseInt(data.number);
+                    if (!isNaN(n) && !sorteados.includes(n)) {
+                        sorteados.push(n);
+                        numeroAtual.textContent = n;
+                        marcarNumero(n);
+                        somSorteio.play();
+                    }
+                } else if (data.type === 'sorted_numbers_history') {
+                    sorteados = data.numbers;
+                    sorteados.forEach(n => marcarNumero(n));
+                    if (sorteados.length > 0) {
+                        numeroAtual.textContent = sorteados[sorteados.length - 1];
+                    }
+                } else if (data.type === 'WINNER') {
+                    const winnerAddress = data.winner_address;
+                    const winnerName = data.winner_name || "Um Jogador Anônimo";
+                    const winMode = data.win_mode || "BINGO";
+                    alert(`BINGO! O jogador ${winnerName} (${winnerAddress}) venceu o jogo fazendo ${winMode.replace('_', ' ')}!`);
+                    somVencedor.play();
+
+                    limparMarcacoesVitoria();
+
+                    if (data.winning_card_data) {
+                        const winningCard = data.winning_card_data;
+                        winningCard.forEach(row => {
+                            row.forEach(cardNum => {
+                                if (cardNum !== 'X' && sorteados.includes(parseInt(cardNum))) {
+                                    const cell = document.getElementById("num-" + cardNum);
+                                    if (cell) {
+                                        cell.classList.add("winner-number");
+                                    }
+                                }
+                            });
+                        });
+                    }
+                } else if (data.type === 'game_reset') {
+                    console.log("Jogo foi reiniciado pelo servidor.");
+                    sorteados = [];
+                    numeroAtual.textContent = "--";
+                    const cells = document.querySelectorAll('#bingoTable td');
+                    cells.forEach(td => td.classList.remove("marked"));
+                    limparMarcacoesVitoria();
+                } else if (data.type === 'player_count_update') {
+                    playersConnectedDiv.textContent = `Jogadores Conectados: ${data.count}`;
+                    console.log(`Número de jogadores atualizado: ${data.count}`);
+                }
+            } catch (e) {
+                console.error("Erro ao parsear mensagem do WebSocket (Sorteador):", e, event.data);
+                const n = parseInt(event.data);
+                if (!isNaN(n) && !sorteados.includes(n)) {
+                    sorteados.push(n);
+                    numeroAtual.textContent = n;
+                    marcarNumero(n);
+                    somSorteio.play();
+                }
+            }
+        };
+
+        socket.onclose = () => {
+            console.log("Desconectado do servidor WebSocket (Sorteador)");
+            statusBar.textContent = "Conexão: Desconectada";
+        };
+
+        socket.onerror = (error) => {
+            console.error("Erro no WebSocket (Sorteador):", error);
+            statusBar.textContent = "Conexão: Erro!";
+        };
+
+
+        btnSortear.onclick = () => {
+            if (sorteados.length >= 75) {
+                alert("Todos os números foram sorteados.");
+                return;
+            }
+            limparMarcacoesVitoria();
+
+            let n;
+            do {
+                n = Math.floor(Math.random() * 75) + 1;
+            } while (sorteados.includes(n));
+
+            socket.send(JSON.stringify({ type: 'sort_number', number: n }));
+        };
+
+        btnReiniciar.onclick = () => {
+            if (confirm("Tem certeza que deseja reiniciar o jogo? Isso irá limpar todas as cartelas!")) {
+                socket.send(JSON.stringify({ type: 'reset_game' }));
+            }
+        };
+
+        gerarTabela();
+    </script>
+</body>
+</html>

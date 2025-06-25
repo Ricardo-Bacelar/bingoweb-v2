@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+    <meta charset="UTF-8" />
+    <title>Cartela de Bingo</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            background-color: #eef2f8;
+            padding: 20px;
+            text-align: center;
+            display: flex; /* Usar flexbox para melhor layout */
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh; /* Ocupa a altura total da viewport */
+        }
+
+        h1 {
+            color: #0078d4;
+            margin-bottom: 10px;
+        }
+
+        #playerNameInput {
+            padding: 8px;
+            margin-bottom: 15px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            font-size: 16px;
+            width: 200px;
+        }
+
+        #bingoCard {
+            margin: 0 auto;
+            border-collapse: collapse;
+            margin-top: 20px;
+            width: 250px;
+        }
+
+        th, td {
+            border: 1px solid #999;
+            width: 50px;
+            height: 50px;
+            text-align: center;
+            vertical-align: middle;
+            font-size: 24px;
+            font-weight: bold;
+        }
+
+        th {
+            background-color: #0078d4;
+            color: white;
+        }
+
+        td {
+            cursor: pointer;
+            background-color: #fff;
+        }
+
+        td.marked {
+            background-color: #ffd700;
+            color: #000;
+        }
+
+        #btnGerarCartela {
+            padding: 10px 20px;
+            font-size: 16px;
+            background-color: #28a745;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            margin-top: 15px;
+        }
+
+        #btnGerarCartela:hover {
+            background-color: #218838;
+        }
+
+        #status-bar {
+            margin-top: 15px;
+            font-weight: bold;
+            color: #333;
+        }
+
+        /* Estilos para a tabela de todos os números sorteados */
+        #sortedNumbersGrid {
+            margin-top: 30px;
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            width: 90%;
+            max-width: 600px; /* Limitar largura para não ficar muito grande */
+            display: grid;
+            grid-template-columns: repeat(15, 1fr); /* 15 colunas para 1-75 */
+            gap: 5px;
+        }
+
+        .number-cell {
+            background-color: #f0f0f0;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            padding: 5px;
+            font-size: 1em;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            aspect-ratio: 1 / 1; /* Células quadradas */
+        }
+
+        .number-cell.called {
+            background-color: #0078d4;
+            color: white;
+        }
+
+        footer {
+            margin-top: auto; /* Empurra o rodapé para o final da página */
+            padding: 20px;
+            background-color: #f2f2f2;
+            color: #555;
+            font-size: 14px;
+            text-align: center;
+            border-top: 1px solid #ddd;
+            width: 100%;
+        }
+
+        footer p {
+            margin: 5px 0;
+        }
+
+        footer a {
+            color: #0078d4;
+            text-decoration: none;
+        }
+
+        footer a:hover {
+            text-decoration: underline;
+        }
+    </style>
+    <!-- Carrega a biblioteca Socket.IO ANTES do seu script personalizado -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.0/socket.io.min.js"></script>
+</head>
+<body>
+    <h1>Minha Cartela de Bingo</h1>
+    <input type="text" id="playerNameInput" placeholder="Digite seu nome (opcional)" />
+    <table id="bingoCard">
+        <thead>
+            <tr>
+                <th>B</th>
+                <th>I</th>
+                <th>N</th>
+                <th>G</th>
+                <th>O</th>
+            </tr>
+        </thead>
+        <tbody id="cardBody">
+            <!-- As células da cartela serão preenchidas aqui pelo JavaScript -->
+        </tbody>
+    </table>
+    <button id="btnGerarCartela">Gerar Nova Cartela</button>
+    <div id="status-bar">Conexão: Aguardando...</div>
+
+    <!-- Novo elemento para exibir todos os números sorteados (o placar) -->
+    <h2>Números Sorteados no Jogo</h2>
+    <div id="sortedNumbersGrid">
+        <!-- Números de 1 a 75 serão gerados aqui pelo JavaScript -->
+    </div>
+
+    <!-- Caminhos dos áudios corrigidos para Heroku/Flask static_folder -->
+    <audio id="somNumeroSorteado" src="{{ url_for('static', filename='audio/numero_sorteado.mp3') }}" preload="auto"></audio>
+    <audio id="somVitoria" src="{{ url_for('static', filename='audio/vencedor.mp3') }}" preload="auto"></audio>
+    <audio id="somOutroVencedor" src="{{ url_for('static', filename='audio/outro_vencedor.mp3') }}" preload="auto"></audio>
+
+    <footer>
+        <p>Kako Projetos, telefone 55(61) 98497-1049</p>
+        <p>E-mail: <a href="mailto:kakojg@gmail.com">kakojg@gmail.com</a></p>
+    </footer>
+
+    <script>
+        const btnGerarCartela = document.getElementById("btnGerarCartela");
+        const cardBody = document.getElementById("cardBody");
+        const statusBar = document.getElementById("status-bar");
+        const playerNameInput = document.getElementById("playerNameInput");
+        const sortedNumbersGrid = document.getElementById("sortedNumbersGrid"); // Novo elemento
+
+        const somNumeroSorteado = document.getElementById("somNumeroSorteado");
+        const somVitoria = document.getElementById("somVitoria");
+        const somOutroVencedor = document.getElementById("somOutroVencedor");
+
+        let currentCard = []; // Armazena a cartela atual do jogador
+        let markedNumbers = []; // Números que o jogador marcou em sua cartela
+        let sortedNumbersFromServer = []; // Números sorteados recebidos do servidor
+
+        // Inicializa a conexão Socket.IO
+        const socket = io(); // Conecta-se automaticamente ao servidor Flask-SocketIO
+
+        // --- Funções de Lógica do Jogo ---
+        function generateUniqueRandom(min, max, excludeList) {
+            let num;
+            do {
+                num = Math.floor(Math.random() * (max - min + 1)) + min;
+            } while (excludeList.includes(num));
+            return num;
+        }
+
+        function gerarCartela() {
+            currentCard = [];
+            markedNumbers = ['X']; // O 'X' central é sempre marcado
+            cardBody.innerHTML = "";
+
+            const ranges = {
+                'B': [1, 15], 'I': [16, 30], 'N': [31, 45], 'G': [46, 60], 'O': [61, 75]
+            };
+
+            const cols = { B: [], I: [], N: [], G: [], O: [] };
+            for (let i = 0; i < 5; i++) {
+                cols.B.push(generateUniqueRandom(ranges.B[0], ranges.B[1], cols.B));
+                cols.I.push(generateUniqueRandom(ranges.I[0], ranges.I[1], cols.I));
+                cols.N.push(generateUniqueRandom(ranges.N[0], ranges.N[1], cols.N));
+                cols.G.push(generateUniqueRandom(ranges.G[0], ranges.G[1], cols.G));
+                cols.O.push(generateUniqueRandom(ranges.O[0], ranges.O[1], cols.O));
+            }
+
+            cols.N[2] = 'X'; // O 'X' central
+
+            for (let i = 0; i < 5; i++) {
+                const tr = document.createElement("tr");
+                const row = [];
+                ['B', 'I', 'N', 'G', 'O'].forEach((colKey) => {
+                    const td = document.createElement("td");
+                    let cellValue = cols[colKey][i];
+                    td.textContent = cellValue;
+                    td.dataset.value = cellValue;
+
+                    if (cellValue === 'X') {
+                        td.classList.add("marked");
+                    }
+
+                    // Se o número da célula já foi sorteado pelo servidor, marca-o
+                    if (cellValue !== 'X' && sortedNumbersFromServer.includes(parseInt(cellValue))) {
+                        td.classList.add("marked");
+                        if (!markedNumbers.includes(parseInt(cellValue))) {
+                            markedNumbers.push(parseInt(cellValue));
+                        }
+                    }
+
+                    td.onclick = () => toggleMark(td, cellValue);
+                    tr.appendChild(td);
+                    row.push(cellValue);
+                });
+                cardBody.appendChild(tr);
+                currentCard.push(row);
+            }
+            console.log("Cartela gerada:", currentCard);
+            sendCardDataToServer(); // Envia a nova cartela para o servidor
+            checkBingo(); // Verifica se já tem bingo com os números históricos
+        }
+
+        function toggleMark(cell, value) {
+            if (value === 'X') return; // Não permite desmarcar o X central
+
+            const numValue = parseInt(value);
+            if (sortedNumbersFromServer.includes(numValue)) { // Só pode marcar se foi sorteado
+                cell.classList.toggle("marked");
+
+                if (cell.classList.contains("marked")) {
+                    markedNumbers.push(numValue);
+                } else {
+                    markedNumbers = markedNumbers.filter(n => n !== numValue);
+                }
+                sendMarkedNumbersUpdate(); // Envia atualização de números marcados
+                checkBingo();
+            } else {
+                alert("Este número ainda não foi sorteado pelo Host!");
+            }
+        }
+
+        function checkBingo() {
+            // Verifica Linhas, Colunas e Diagonais para BINGO
+            const checkPattern = (cells) => {
+                return cells.every(cell => markedNumbers.includes(parseInt(cell)) || cell === 'X');
+            };
+
+            // Linhas
+            for (let i = 0; i < 5; i++) {
+                if (checkPattern(currentCard[i])) {
+                    sendBingoToServer("linha");
+                    return;
+                }
+            }
+
+            // Colunas
+            for (let j = 0; j < 5; j++) {
+                const column = [];
+                for (let i = 0; i < 5; i++) {
+                    column.push(currentCard[i][j]);
+                }
+                if (checkPattern(column)) {
+                    sendBingoToServer("coluna");
+                    return;
+                }
+            }
+
+            // Diagonal Principal (B1 -> O5)
+            const diag1 = [];
+            for (let i = 0; i < 5; i++) {
+                diag1.push(currentCard[i][i]);
+            }
+            if (checkPattern(diag1)) {
+                sendBingoToServer("diagonal_principal");
+                return;
+            }
+
+            // Diagonal Secundária (O1 -> B5)
+            const diag2 = [];
+            for (let i = 0; i < 5; i++) {
+                diag2.push(currentCard[i][4 - i]);
+            }
+            if (checkPattern(diag2)) {
+                sendBingoToServer("diagonal_secundaria");
+                return;
+            }
+
+            // Cartela Cheia (Blackout)
+            if (currentCard.flat().filter(val => val !== 'X').every(val => markedNumbers.includes(parseInt(val)))) {
+                sendBingoToServer("cartela_cheia");
+                return;
+            }
+        }
+
+        // Função para exibir todos os números sorteados na grade 1-75
+        function updateSortedNumbersGrid() {
+            sortedNumbersGrid.innerHTML = ''; // Limpa a grade existente
+
+            for (let i = 1; i <= 75; i++) {
+                const cell = document.createElement('div');
+                cell.classList.add('number-cell');
+                cell.textContent = i;
+                if (sortedNumbersFromServer.includes(i)) {
+                    cell.classList.add('called'); // Adiciona classe para números sorteados
+                }
+                sortedNumbersGrid.appendChild(cell);
+            }
+        }
+
+
+        // --- Funções de Comunicação Socket.IO ---
+
+        function sendBingoToServer(winMode) {
+            if (btnGerarCartela.disabled) {
+                return;
+            }
+
+            const validMarkedNumbers = markedNumbers.filter(num => num !== 'X' && !isNaN(num));
+
+            socket.emit('BINGO', {
+                win_mode: winMode,
+                card_data: currentCard,
+                marked_numbers: validMarkedNumbers,
+                player_name: playerNameInput.value.trim() || `Jogador #${socket.id.substring(0,4)}`
+            });
+            somVitoria.play();
+            alert(`BINGO! Você fez ${winMode.replace('_', ' ')}! Aguardando o Host confirmar.`);
+            btnGerarCartela.disabled = true;
+        }
+
+        function sendCardDataToServer() {
+            socket.emit('player_card_data', {
+                card_data: currentCard,
+                player_name: playerNameInput.value.trim() || `Jogador #${socket.id.substring(0,4)}`
+            });
+            console.log("Dados da cartela enviados ao servidor.");
+        }
+
+        function sendMarkedNumbersUpdate() {
+            socket.emit('card_marked_number', {
+                marked_numbers: markedNumbers.filter(num => num !== 'X' && !isNaN(num))
+            });
+        }
+
+
+        // --- Manipuladores de Eventos Socket.IO (Recebendo do Servidor) ---
+
+        socket.on('connect', () => {
+            console.log("Conectado ao servidor WebSocket (Cartela)");
+            statusBar.textContent = "Conexão: Online";
+            gerarCartela(); // Gera a cartela assim que conecta
+            updateSortedNumbersGrid(); // Inicializa o placar de números sorteados
+        });
+
+        socket.on('disconnect', () => {
+            console.log("Desconectado do servidor WebSocket (Cartela)");
+            statusBar.textContent = "Conexão: Desconectada";
+            btnGerarCartela.disabled = false;
+        });
+
+        socket.on('numero_sorteado_bingo', (data) => {
+            try {
+                const n = parseInt(data.number);
+                if (isNaN(n)) return;
+
+                if (!sortedNumbersFromServer.includes(n)) {
+                    sortedNumbersFromServer.push(n);
+                    sortedNumbersFromServer.sort((a,b) => a - b); // Manter ordenado
+                }
+                updateSortedNumbersGrid(); // Atualiza o placar de números
+                
+                const cells = cardBody.querySelectorAll('td');
+                cells.forEach(cell => {
+                    if (parseInt(cell.dataset.value) === n) {
+                        cell.classList.add("marked");
+                        if (cell.dataset.value !== 'X' && !markedNumbers.includes(n)) {
+                            markedNumbers.push(n);
+                        }
+                        somNumeroSorteado.play();
+                        checkBingo();
+                    }
+                });
+            } catch (e) {
+                console.error("Erro ao processar 'numero_sorteado_bingo':", e, data);
+            }
+        });
+
+        socket.on('sorted_numbers_history', (data) => {
+            try {
+                sortedNumbersFromServer = data.numbers.map(Number);
+                sortedNumbersFromServer.sort((a, b) => a - b); // Manter ordenado
+                console.log("Histórico de números sorteados recebido:", sortedNumbersFromServer);
+                updateSortedNumbersGrid(); // Atualiza o placar de números com o histórico
+
+                const cells = cardBody.querySelectorAll('td');
+                cells.forEach(cell => {
+                    const cellValue = parseInt(cell.dataset.value);
+                    if (!isNaN(cellValue) && cell.dataset.value !== 'X' && sortedNumbersFromServer.includes(cellValue)) {
+                        cell.classList.add("marked");
+                        if (!markedNumbers.includes(cellValue)) {
+                            markedNumbers.push(cellValue);
+                        }
+                    }
+                });
+                checkBingo();
+            } catch (e) {
+                console.error("Erro ao processar 'sorted_numbers_history':", e, data);
+            }
+        });
+
+        socket.on('WINNER_ANNOUNCEMENT', (data) => {
+            try {
+                const winnerName = data.winner_name || "Um Jogador Anônimo";
+                const winMode = data.win_mode || "BINGO";
+
+                if (data.winner_sid === socket.id) {
+                    // Já tratado localmente pelo sendBingoToServer, opcionalmente adicione mais feedback aqui
+                } else {
+                    somOutroVencedor.play();
+                    alert(`BINGO! Outro jogador fez ${winMode.replace('_', ' ')}! (${winnerName})`);
+                    btnGerarCartela.disabled = true;
+                }
+            } catch (e) {
+                console.error("Erro ao processar 'WINNER_ANNOUNCEMENT':", e, data);
+            }
+        });
+
+        socket.on('game_reset', () => {
+            alert("O Host reiniciou o jogo! Gerando nova cartela...");
+            sortedNumbersFromServer = []; // Limpa o histórico de números sorteados
+            updateSortedNumbersGrid(); // Limpa o placar visual
+            btnGerarCartela.disabled = false;
+            gerarCartela(); // Gera uma nova cartela para o jogador
+        });
+
+        socket.on('error', (error) => {
+            console.error("Erro no WebSocket (Cartela):", error);
+            statusBar.textContent = "Conexão: Erro!";
+        });
+
+        // --- Event Listeners ---
+        btnGerarCartela.onclick = gerarCartela;
+        
+        // Gera o grid de números de 1 a 75 na inicialização
+        updateSortedNumbersGrid();
+    </script>
+</body>
+</html>
